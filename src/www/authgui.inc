@@ -57,7 +57,7 @@ function webgui_combine_password_otp($password, $otp, $authserver)
     if ($authserver === null || $otp === '') {
         return $password;
     }
-    return !empty($authserver['passwordFirst']) ? ($otp . $password) : ($password . $otp);
+    return !empty($authserver['passwordFirst']) ? ($password . $otp) : ($otp . $password);
 }
 
 function set_language()
