@@ -181,19 +181,26 @@ function session_auth(&$Login_Error = null, &$Login_OTP = false)
         $password = $_POST['passwordfld'];
         if ($authFactory->authenticateStep1("WebGui", $username, $password)) {
             // First factor (password) is valid!
-            $otp_authname = $authFactory->findOTPAuthenticator("WebGui", $username);
+            $otp_authname = null;
+            if ($authFactory->secondFactorPending) {
+                $otp_authname = $authFactory->findOTPAuthenticator("WebGui", $username);
+            }
             if ($otp_authname !== null) {
                 // User has OTP configured. Defer login to collect OTP.
                 // We do NOT stash the password in the session! The nonce is echoed back by the
                 // token form so only the party which passed step 1 can offer a token, the
                 // authenticator name binds the token check to the server found in this step.
-                session_regenerate_id();
+                session_regenerate_id(true);
                 $otp_nonce = bin2hex(random_bytes(16));
                 $_SESSION['login_otp_pending'] = [
                     'username' => $username,
                     'authname' => $otp_authname,
                     'nonce' => $otp_nonce,
-                    'shouldChangePassword' => $authFactory->shouldChangePassword($authFactory->lastUsedAuth, $username, $password),
+                    'shouldChangePassword' => $authFactory->shouldChangePassword(
+                        $authFactory->lastUsedAuth,
+                        $username,
+                        $password
+                    ),
                     'expires' => time() + WEBGUI_OTP_STEP_TIMEOUT,
                 ];
                 session_write_close();
@@ -202,7 +209,11 @@ function session_auth(&$Login_Error = null, &$Login_OTP = false)
             } else {
                 // User does not use OTP. Immediately authenticated.
                 $is_authenticated = true;
-                $shouldChangePassword = $authFactory->shouldChangePassword($authFactory->lastUsedAuth, $username, $password);
+                $shouldChangePassword = $authFactory->shouldChangePassword(
+                    $authFactory->lastUsedAuth,
+                    $username,
+                    $password
+                );
             }
         } else {
             // Password invalid. Immediate failure.
@@ -251,7 +262,10 @@ function session_auth(&$Login_Error = null, &$Login_OTP = false)
             $_SESSION['user_shouldChangePassword'] = true;
         }
         if (!isset($config['system']['webgui']['quietlogin'])) {
-            auth_log(sprintf("Successful login for user '%s' from: %s", $username, $_SERVER['REMOTE_ADDR']), LOG_NOTICE);
+            auth_log(
+                sprintf("Successful login for user '%s' from: %s", $username, $_SERVER['REMOTE_ADDR']),
+                LOG_NOTICE
+            );
         }
         if (!empty($_GET['url'])) {
             $uri = (new OPNsense\Core\SanitizeFilter())->sanitize($_GET['url'], 'local_uri');
@@ -467,38 +481,42 @@ function display_login_form($Login_Error, $Login_OTP = false)
 
             <form class="clearfix" id="iform" name="iform" method="post" autocomplete="off">
 
-<?php    if ($Login_OTP): ?>
+        <?php if ($Login_OTP) : ?>
         <div class="form-group">
-          <label for="otp_code"><?=gettext("One time password:"); ?></label>
-          <input id="otp_code" type="text" name="otp_code" class="form-control" tabindex="1" autofocus="autofocus" autocomplete="one-time-code" inputmode="numeric" autocapitalize="off" autocorrect="off" />
+          <label for="otp_code"><?=gettext("One-time password:"); ?></label>
+          <input id="otp_code" type="text" name="otp_code" class="form-control" tabindex="1"
+                 autofocus="autofocus" autocomplete="one-time-code" inputmode="numeric"
+                 autocapitalize="off" autocorrect="off" />
           <span class="help-block"><?=gettext("Enter the one-time password from your authenticator."); ?></span>
         </div>
 
         <input type="hidden" name="otp_nonce" value="<?=html_safe($Login_OTP); ?>" />
         <button type="submit" name="login_otp" value="1" class="btn btn-primary pull-right"><?=gettext("Continue"); ?></button>
-<?php    else: ?>
+        <?php else : ?>
         <div class="form-group">
           <label for="usernamefld"><?=gettext("Username:"); ?></label>
-          <input id="usernamefld" type="text" name="usernamefld" class="form-control user" tabindex="1" autofocus="autofocus" autocapitalize="off" autocorrect="off" />
+          <input id="usernamefld" type="text" name="usernamefld" class="form-control user" tabindex="1"
+                 autofocus="autofocus" autocapitalize="off" autocorrect="off" autocomplete="username" />
         </div>
 
         <div class="form-group">
           <label for="passwordfld"><?=gettext("Password:"); ?></label>
-          <input id="passwordfld" type="password" name="passwordfld" class="form-control pwd" tabindex="2" />
+          <input id="passwordfld" type="password" name="passwordfld" class="form-control pwd" tabindex="2"
+                 autocomplete="current-password" />
         </div>
 
         <button type="submit" name="login" value="1" class="btn btn-primary pull-right"><?=gettext("Login"); ?></button>
-<?php    endif ?>
+        <?php endif ?>
 
       </form>
 
-<?php    if (!$Login_OTP): ?>
-<?php    foreach ((new \OPNsense\Auth\AuthenticationFactory())->listSSOproviders('WebGui') as $provider):?>
+        <?php if (!$Login_OTP) : ?>
+            <?php foreach ((new \OPNsense\Auth\AuthenticationFactory())->listSSOproviders('WebGui') as $provider) : ?>
 <div class="login-sso-link-container">
-    <?=$provider->renderLink();?>
+                <?=$provider->renderLink();?>
 </div>
-<?php    endforeach;?>
-<?php    endif ?>
+            <?php endforeach; ?>
+        <?php endif ?>
 
       <?php if (!$have_cookies && isset($_POST['login'])) : ?>
         <br /><br />

@@ -58,6 +58,11 @@ trait TOTP
     private $passwordFirst = false;
 
     /**
+     * @var bool last authenticateFirstFactor() call matched a token code joined to the password
+     */
+    private $firstFactorComposed = false;
+
+    /**
      * use graceperiod and timeWindow to calculate which moments in time we should check
      * @return array timestamps
      */
@@ -191,9 +196,31 @@ trait TOTP
      */
     public function authenticateFirstFactor($username, $password)
     {
+        $this->firstFactorComposed = false;
         return $this->timedAuthenticate(function () use ($username, $password) {
-            return $this->hasOTP($username) && parent::_authenticate($username, $password);
+            if (!$this->hasOTP($username)) {
+                return false;
+            }
+            if (parent::_authenticate($username, $password)) {
+                return true;
+            }
+            // keep accepting the single request form, a token code joined to the password,
+            // both checks share one timed sequence so response time does not tell them apart
+            if ($this->_authenticate($username, $password)) {
+                $this->firstFactorComposed = true;
+                return true;
+            }
+            return false;
         });
+    }
+
+    /**
+     * @return bool true when the last authenticateFirstFactor() call matched a token code joined
+     *              to the password, both factors are verified and no token step should follow
+     */
+    public function isFirstFactorComposed()
+    {
+        return $this->firstFactorComposed;
     }
 
     /**

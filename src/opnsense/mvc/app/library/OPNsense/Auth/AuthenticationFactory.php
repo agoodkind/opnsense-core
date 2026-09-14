@@ -43,6 +43,11 @@ class AuthenticationFactory
     var $lastUsedAuth = null;
 
     /**
+     * @var bool authenticateStep1() verified the password and a token step must follow
+     */
+    public $secondFactorPending = false;
+
+    /**
      * list installed auth connectors
      * @return array
      */
@@ -223,7 +228,7 @@ class AuthenticationFactory
     public function shouldChangePassword($authenticator, $username, $password)
     {
         if ($authenticator !== null) {
-            if ($this->usesTOTP($authenticator)) {
+            if ($this->usesTOTP($authenticator) && !$authenticator->isFirstFactorComposed()) {
                 return $authenticator->shouldChangePasswordStep1($username, $password);
             }
             return $authenticator->shouldChangePassword($username, $password);
@@ -275,11 +280,18 @@ class AuthenticationFactory
      */
     public function authenticateStep1($service_name, $username, $password)
     {
+        $this->secondFactorPending = false;
         openlog("audit", LOG_ODELAY, LOG_AUTH);
         $service = $this->getService($service_name);
         if ($service !== null) {
+            // users holding a token seed must pass both steps on the authenticator verifying their
+            // token, another authenticator accepting the password may not start the token step.
+            $otp_authname = $this->findOTPAuthenticator($service_name, $username);
             $service->setUserName($username);
             foreach ($service->supportedAuthenticators() as $authname) {
+                if ($otp_authname !== null && $authname != $otp_authname) {
+                    continue;
+                }
                 $authenticator = $this->get($authname);
                 if ($authenticator === null) {
                     continue;
@@ -305,7 +317,10 @@ class AuthenticationFactory
                         ));
                         return false;
                     }
-                    if (!$this->userUsesOTP($service_name, $username)) {
+                    // a token code joined to the password already verified both factors
+                    $composed = $this->usesTOTP($authenticator) && $authenticator->isFirstFactorComposed();
+                    $this->secondFactorPending = !$composed && $otp_authname !== null;
+                    if (!$this->secondFactorPending) {
                         // authentication is complete, log as the single request flow would.
                         // when a token collection step follows, its completion logs instead.
                         syslog(LOG_NOTICE, sprintf(
