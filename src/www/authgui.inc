@@ -434,12 +434,12 @@ function display_login_form($Login_Error)
           <input id="passwordfld" type="password" name="passwordfld" class="form-control pwd" tabindex="2" autocomplete="current-password" />
         </div>
 
-<?php if ($totp_authserver !== null) : ?>
+        <?php if ($totp_authserver !== null) : ?>
         <div class="form-group">
           <label for="otpfld"><?=gettext("One-time password:"); ?></label>
           <input id="otpfld" type="text" name="otpfld" class="form-control otp" tabindex="3" inputmode="numeric" autocomplete="one-time-code" />
         </div>
-<?php endif; ?>
+        <?php endif ?>
 
         <button type="submit" name="login" value="1" class="btn btn-primary pull-right"><?=gettext("Login"); ?></button>
 
