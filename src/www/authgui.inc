@@ -36,6 +36,30 @@ require_once("auth.inc");
 $acl = new OPNsense\Core\ACL();
 $priv_list = $acl->getPrivList();
 
+function webgui_totp_authserver()
+{
+    global $config;
+    $authmode = !empty($config['system']['webgui']['authmode'])
+        ? explode(',', $config['system']['webgui']['authmode'])
+        : ['Local Database'];
+    foreach ($authmode as $authname) {
+        $authserver = auth_get_authserver($authname);
+        if ($authserver !== false && in_array($authserver['type'], ['totp', 'ldap-totp'])) {
+            return $authserver;
+        }
+    }
+    return null;
+}
+
+function webgui_combine_password_otp($password, $otp, $authserver)
+{
+    $otp = trim((string)$otp);
+    if ($authserver === null || $otp === '') {
+        return $password;
+    }
+    return !empty($authserver['passwordFirst']) ? ($otp . $password) : ($password . $otp);
+}
+
 function set_language()
 {
     global $config, $userindex;
@@ -168,8 +192,10 @@ function session_auth()
 
     /* Validate incoming login request */
     if (isset($_POST['login']) && !empty($_POST['usernamefld']) && !empty($_POST['passwordfld'])) {
+        $totp_authserver = webgui_totp_authserver();
+        $combinedPassword = webgui_combine_password_otp($_POST['passwordfld'], $_POST['otpfld'] ?? '', $totp_authserver);
         $authFactory = new \OPNsense\Auth\AuthenticationFactory();
-        $is_authenticated = $authFactory->authenticate("WebGui", $_POST['usernamefld'], $_POST['passwordfld']);
+        $is_authenticated = $authFactory->authenticate("WebGui", $_POST['usernamefld'], $combinedPassword);
 
         if ($is_authenticated) {
             $authenticator = $authFactory->lastUsedAuth;
@@ -178,7 +204,7 @@ function session_auth()
             $_SESSION['Username'] = $authenticator->getUserName($_POST['usernamefld']);
             $_SESSION['last_access'] = time();
             $_SESSION['protocol'] = $config['system']['webgui']['protocol'];
-            if ($authenticator != null && $authenticator->shouldChangePassword($_SESSION['Username'], $_POST['passwordfld'])) {
+            if ($authenticator != null && $authenticator->shouldChangePassword($_SESSION['Username'], $combinedPassword)) {
                 $_SESSION['user_shouldChangePassword'] = true;
             }
             if (!isset($config['system']['webgui']['quietlogin'])) {
@@ -349,6 +375,7 @@ function display_login_form($Login_Error)
     global $config;
 
     $product = product::getInstance();
+    $totp_authserver = webgui_totp_authserver();
 
     setcookie("cookie_test", bin2hex(random_bytes(16)), time() + 3600, '/', '', $config['system']['webgui']['protocol'] == 'https', true);
     $have_cookies = isset($_COOKIE["cookie_test"]);
@@ -399,13 +426,20 @@ function display_login_form($Login_Error)
 
         <div class="form-group">
           <label for="usernamefld"><?=gettext("Username:"); ?></label>
-          <input id="usernamefld" type="text" name="usernamefld" class="form-control user" tabindex="1" autofocus="autofocus" autocapitalize="off" autocorrect="off" />
+          <input id="usernamefld" type="text" name="usernamefld" class="form-control user" tabindex="1" autofocus="autofocus" autocapitalize="off" autocorrect="off" autocomplete="username" />
         </div>
 
         <div class="form-group">
           <label for="passwordfld"><?=gettext("Password:"); ?></label>
-          <input id="passwordfld" type="password" name="passwordfld" class="form-control pwd" tabindex="2" />
+          <input id="passwordfld" type="password" name="passwordfld" class="form-control pwd" tabindex="2" autocomplete="current-password" />
         </div>
+
+<?php if ($totp_authserver !== null) : ?>
+        <div class="form-group">
+          <label for="otpfld"><?=gettext("One-time password:"); ?></label>
+          <input id="otpfld" type="text" name="otpfld" class="form-control otp" tabindex="3" inputmode="numeric" autocomplete="one-time-code" />
+        </div>
+<?php endif; ?>
 
         <button type="submit" name="login" value="1" class="btn btn-primary pull-right"><?=gettext("Login"); ?></button>
 
